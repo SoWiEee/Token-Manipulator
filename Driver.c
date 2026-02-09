@@ -43,6 +43,7 @@ NTSTATUS StealTokenHandler() {
 
 // IOCTL handler
 NTSTATUS DriverDispatch(PDEVICE_OBJECT pDeviceObject, PIRP pIrp) {
+    UNREFERENCED_PARAMETER(pDeviceObject);
     PIO_STACK_LOCATION pIoStackLocation = IoGetCurrentIrpStackLocation(pIrp);
     NTSTATUS status = STATUS_SUCCESS;
 
