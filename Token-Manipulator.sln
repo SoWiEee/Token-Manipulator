@@ -1,0 +1,35 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36623.8 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Token-Manipulator", "Token-Manipulator.vcxproj", "{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|ARM64 = Debug|ARM64
+		Debug|x64 = Debug|x64
+		Release|ARM64 = Release|ARM64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|ARM64.Build.0 = Debug|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|ARM64.Deploy.0 = Debug|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|x64.ActiveCfg = Debug|x64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|x64.Build.0 = Debug|x64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Debug|x64.Deploy.0 = Debug|x64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|ARM64.ActiveCfg = Release|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|ARM64.Build.0 = Release|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|ARM64.Deploy.0 = Release|ARM64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|x64.ActiveCfg = Release|x64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|x64.Build.0 = Release|x64
+		{BC6FFCF1-1FDF-158F-6818-DBCC7BFC2BDC}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {68CD47B6-2E89-4CA7-B8F1-E5A7FA50B2EE}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,62 @@
+;
+; Token-Manipulator.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System ; TODO: specify appropriate Class
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318} ; TODO: specify appropriate ClassGuid
+Provider    = %ManufacturerName%
+CatalogFile = Token-Manipulator.cat
+DriverVer   = ; TODO: set DriverVer in stampinf property pages
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+Token-Manipulator.sys = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299 ; %13% support introduced in build 16299
+
+[Standard.NT$ARCH$.10.0...16299]
+%Token-Manipulator.DeviceDesc% = Token-Manipulator_Device, Root\Token-Manipulator ; TODO: edit hw-id
+
+[Token-Manipulator_Device.NT]
+CopyFiles = File_Copy
+
+[File_Copy]
+Token-Manipulator.sys
+
+;-------------- Service installation
+[Token-Manipulator_Device.NT.Services]
+AddService = Token-Manipulator,%SPSVCINST_ASSOCSERVICE%, Token-Manipulator_Service_Inst
+
+; -------------- Token-Manipulator driver install sections
+[Token-Manipulator_Service_Inst]
+DisplayName    = %Token-Manipulator.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\Token-Manipulator.sys
+
+[Token-Manipulator_Device.NT.Wdf]
+KmdfService = Token-Manipulator, Token-Manipulator_wdfsect
+
+[Token-Manipulator_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "<Your manufacturer name>" ;TODO: Replace with your manufacturer name
+DiskName = "Token-Manipulator Installation Disk"
+Token-Manipulator.DeviceDesc = "Token-Manipulator Device"
+Token-Manipulator.SVCDESC = "Token-Manipulator Service"
