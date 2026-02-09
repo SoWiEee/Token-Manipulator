@@ -24,3 +24,12 @@ bcdedit /set testsigning on
 sc create MyJob type= kernel binPath= "C:\path\to\*.sys"
 sc start MyJob
 ```
+
+# 2. Token Patcher
+
+- [_TOKEN structure](https://www.vergiliusproject.com/kernels/x64/windows-11/25h2/_TOKEN)
+
+```cpp
+struct _SEP_TOKEN_PRIVILEGES Privileges;                // 0x40
+```
+
