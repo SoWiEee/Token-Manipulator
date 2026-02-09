@@ -11,3 +11,16 @@ A practical tool motivated by AIS3 2025 Windows Kernel course.
 ```cpp
 struct _EX_FAST_REF Token;                              // 0x248
 ```
+
+## Usage
+
+1. Use VS 2022 build this solution
+2. Open Test mode
+```
+bcdedit /set testsigning on
+```
+3. Create a service and start it
+```
+sc create MyJob type= kernel binPath= "C:\path\to\*.sys"
+sc start MyJob
+```
