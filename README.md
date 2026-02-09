@@ -33,3 +33,21 @@ sc start MyJob
 struct _SEP_TOKEN_PRIVILEGES Privileges;                // 0x40
 ```
 
+## Usage
+
+1. Use VS 2022 build this solution
+2. Open Test mode
+```
+bcdedit /set testsigning on
+```
+3. Create a service and start it
+```
+sc create MyJob type= kernel binPath= "C:\path\to\*.sys"
+sc start MyJob
+```
+4. Run client program to patch token
+```
+whoami
+whoami /priv
+```
+
