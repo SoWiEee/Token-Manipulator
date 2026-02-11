@@ -33,7 +33,7 @@ Write-Color @"
 Write-Host ""
 Write-Color "[*] Gathering Advanced Security Metrics..." -Color Yellow
 
-# --- 2. Base Security Checks (Previous V2) ---
+# --- 2. Base Security Checks ---
 $SecureBoot = try { (Get-SecureBootUEFI) } catch { $false }
 
 # Device Guard / VBS
@@ -51,7 +51,7 @@ try {
     $Blocklist_Status = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name 'VulnerableDriverBlocklistEnable' -ErrorAction SilentlyContinue).VulnerableDriverBlocklistEnable -eq 1
 } catch { $Blocklist_Status = $false }
 
-# --- 3. Advanced Mitigations (New Request) ---
+# --- 3. Advanced Mitigations ---
 
 # 3.1 KASLR & PML4 Randomization
 # Windows 10/11 defaults KASLR to ON unless "MoveImages" is disabled in Registry.
@@ -78,13 +78,31 @@ try {
 
 # 3.3 Exploit Guard (User Mode: CFG, DEP, SEHOP, ASLR)
 try {
+    # 修正 DEP 檢查：改查系統策略 (0=AlwaysOff, 1=AlwaysOn, 2=OptIn, 3=OptOut)
+    $OS_DEP = Get-CimInstance -ClassName Win32_OperatingSystem
+    $DEP_Policy = $OS_DEP.DataExecutionPrevention_SupportPolicy
+    
+    if ($DEP_Policy -eq 1 -or $DEP_Policy -eq 3) { 
+        $DEP_Status = $true; $DEP_Note = "ON (All Processes)" 
+    } elseif ($DEP_Policy -eq 2) { 
+        $DEP_Status = $true; $DEP_Note = "ON (System Binaries Only / Opt-In)" # Win11 Default
+    } else { 
+        $DEP_Status = $false; $DEP_Note = "OFF" 
+    }
+
     $SysMitigation = Get-ProcessMitigation -System
-    $DEP_Status    = ($SysMitigation.Dep.Enable -eq $true)
-    $CFG_Status    = ($SysMitigation.ControlFlowGuard.Enable -eq $true) # User Mode CFG
-    $SEHOP_Status  = ($SysMitigation.Sehop.Enable -eq $true) # Exception Chain Validation
-    $ForceASLR_Status = ($SysMitigation.Aslr.ForceRelocateImages -eq $true) # Force ASLR (helps against non-ASLR DLLs)
+    
+    # CFG: System-wide enforcement is rarely on. Modern binaries have it compiled-in.
+    $CFG_Enforced = ($SysMitigation.ControlFlowGuard.Enable -eq $true)
+    
+    # SEHOP: Deprecated in Win10/11, usually OFF.
+    $SEHOP_Status  = ($SysMitigation.Sehop.Enable -eq $true)
+    
+    # Force ASLR: Forces ASLR on non-dynamic base executables. Default is OFF.
+    $ForceASLR_Status = ($SysMitigation.Aslr.ForceRelocateImages -eq $true)
+    
 } catch {
-    $DEP_Status=$false; $CFG_Status=$false; $SEHOP_Status=$false; $ForceASLR_Status=$false
+    $DEP_Status=$false; $CFG_Enforced=$false; $SEHOP_Status=$false; $ForceASLR_Status=$false
 }
 
 # 3.4 Kernel Control Flow Guard (KCFG)
@@ -126,10 +144,10 @@ $Results += [PSCustomObject]@{ Category="Kernel"; Feature="KCET (Shadow Stacks)"
 $Results += [PSCustomObject]@{ Category="Kernel"; Feature="SMAP/SMEP Support"; Enabled=$true; Note="Assumed on Win11 (Prevents User Access)" }
 
 # Group 2: User Mode & Memory
-$Results += [PSCustomObject]@{ Category="UserMode"; Feature="CFG (Control Flow Guard)"; Enabled=$CFG_Status; Note="Prevents Indirect Call Abuse" }
-$Results += [PSCustomObject]@{ Category="UserMode"; Feature="DEP (Data Exec Prev)"; Enabled=$DEP_Status; Note="No Execute (NX) Stack/Heap" }
-$Results += [PSCustomObject]@{ Category="UserMode"; Feature="SEHOP (Exception Chain)"; Enabled=$SEHOP_Status; Note="Prevents SEH Overwrites" }
-$Results += [PSCustomObject]@{ Category="UserMode"; Feature="Force ASLR / Bottom-Up"; Enabled=$ForceASLR_Status; Note="Enforced Randomization" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="DEP (Data Exec Prev)"; Enabled=$DEP_Status; Note=$DEP_Note }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="Force CFG (Global)"; Enabled=$CFG_Enforced; Note="Forcing CFG on legacy apps (Default: OFF)" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="SEHOP (Exception Chain)"; Enabled=$SEHOP_Status; Note="Deprecated in Win11 (Default: OFF)" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="Force ASLR (Relocate)"; Enabled=$ForceASLR_Status; Note="Forcing ASLR on legacy apps (Default: OFF)" }
 $Results += [PSCustomObject]@{ Category="UserMode"; Feature="ACG / CIG (Policy)"; Enabled=$CIG_Status; Note="Code Integrity Policy" }
 
 # Group 3: System Defense
@@ -150,7 +168,7 @@ foreach ($item in $Results) {
     Write-Host "| $($item.Note)"
 }
 
-# --- 5. Hacker's Perspective (Updated) ---
+# --- 5. Hacker's Perspective ---
 Write-Host "`n=== Exploitation Difficulty Analysis (Hacker View) ===" -ForegroundColor Magenta
 
 # Analysis Logic
@@ -161,7 +179,7 @@ $Kernel_Write = if ($SMAP_Status -and $HVCI_Status) { "Impossible (Need Data-Onl
 
 Write-Host "1. Kernel Exploit (Info Leak) : " -NoNewline; Write-Color $InfoLeak_Req -Color (Get-StatusColor $KASLR_Status)
 Write-Host "2. ROP Chain Construction     : " -NoNewline; Write-Color $ROP_Diff -Color (Get-StatusColor $KCET_Status)
-Write-Host "3. Function Pointer Overwrite : " -NoNewline; Write-Color $Heap_Diff -Color (Get-StatusColor $CFG_Status)
+Write-Host "3. Function Pointer Overwrite : " -NoNewline; Write-Color $Heap_Diff -Color (Get-StatusColor $CFG_Enforced)
 Write-Host "4. Kernel Payload Execution   : " -NoNewline; Write-Color $Kernel_Write -Color (Get-StatusColor $HVCI_Status)
 Write-Host "5. Initial Access (Macro/Script): " -NoNewline; Write-Color "$($ASR_Note)" -Color (Get-StatusColor $ASR_Status)
 
