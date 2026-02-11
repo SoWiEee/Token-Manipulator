@@ -1,35 +1,26 @@
 <#
 .SYNOPSIS
-    Windows Kernel Security Auditor (Fixed Version)
+    Windows Advanced Security Mitigation Auditor
 .DESCRIPTION
-    Analyzes Windows security features relevant to Kernel Exploitation, Rootkits, and LPE.
-    Fixed compatibility for PowerShell 5.1 and 7+.
+    Checks for Kernel/User-mode mitigations including KASLR, SMAP, SMEP, KCFG, CFG, KVA Shadow, ASR, etc.
 #>
 
-# --- Helper Function for Colors ---
+# --- 0. Helper Functions ---
 function Write-Color {
     param([string]$Text, [string]$Color = "White", [switch]$NoNewline)
-    
-    # 防呆機制：如果顏色是空的，強制設為白色，避免報錯
     if ([string]::IsNullOrWhiteSpace($Color)) { $Color = "White" }
-
     $params = @{ ForegroundColor = $Color }
     if ($NoNewline) { $params.Add("NoNewline", $true) }
     Write-Host $Text @params
 }
 
 function Get-StatusColor {
-    param([bool]$Enabled, [bool]$Inverse = $false) # Inverse for things like "Vulnerable"
-    
-    # 修正：使用標準 PowerShell 語法，分開 return
-    if ($Inverse) {
-        if ($Enabled) { return "Red" } else { return "Green" }
-    } else {
-        if ($Enabled) { return "Green" } else { return "Red" }
-    }
+    param([bool]$Enabled, [bool]$Inverse = $false)
+    if ($Inverse) { if ($Enabled) { return "Red" } else { return "Green" } }
+    else { if ($Enabled) { return "Green" } else { return "Red" } }
 }
 
-# --- ASCII Art ---
+# --- 1. Gather System Info ---
 Write-Color @"
  _    _  _____  ____  _   _  _____  _      
 | |  | ||  ___||  _ \| \ | ||  ___|| |     
@@ -37,118 +28,141 @@ Write-Color @"
 | |/\| ||  __| |  _ <| . ` ||  __| | |     
 \  /\  /| |___ | |_) | |\  || |___ | |____ 
  \/  \/ \____/ |____/|_| \_|\____/ \_____/ 
- Kernel Security Auditor v2.1 (Fixed)
+ Advanced Security Auditor v3.0
 "@ -Color Cyan
 Write-Host ""
+Write-Color "[*] Gathering Advanced Security Metrics..." -Color Yellow
 
-# --- 1. Gather System Info ---
-Write-Color "[*] Gathering System Information..." -Color Yellow
-$OSParams = Get-CimInstance -ClassName Win32_OperatingSystem
-Write-Host "OS Version      : $($OSParams.Caption) (Build $($OSParams.BuildNumber))"
+# --- 2. Base Security Checks (Previous V2) ---
+$SecureBoot = try { (Get-SecureBootUEFI) } catch { $false }
 
-# --- 2. Security Feature Checks ---
-
-# 2.1 Secure Boot (Rootkit Prevention)
-$SecureBoot = $false
-try {
-    # 增加錯誤處理，避免在某些舊 BIOS 機器上紅字
-    $sbCmd = Get-SecureBootUEFI -ErrorAction SilentlyContinue
-    if ($sbCmd) { $SecureBoot = $true }
-} catch { $SecureBoot = $false }
-
-# 2.2 Device Guard / VBS / HVCI
+# Device Guard / VBS
 try {
     $DeviceGuard = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard -ErrorAction SilentlyContinue
     if ($DeviceGuard) {
-        $VBS_Status = $DeviceGuard.VirtualizationBasedSecurityStatus # 2 = Running
-        $HVCI_Status = $DeviceGuard.SecurityServicesRunning -contains 2
-        $CredGuard_Status = $DeviceGuard.SecurityServicesRunning -contains 1
-        $SMM_Status = $DeviceGuard.SecurityServicesRunning -contains 4
-    } else {
-        $VBS_Status = 0
-        $HVCI_Status = $false
-        $CredGuard_Status = $false
-    }
-} catch {
-    $VBS_Status = 0; $HVCI_Status = $false; $CredGuard_Status = $false
-}
+        $VBS_Status = ($DeviceGuard.VirtualizationBasedSecurityStatus -eq 2)
+        $HVCI_Status = ($DeviceGuard.SecurityServicesRunning -contains 2)
+        $CredGuard_Status = ($DeviceGuard.SecurityServicesRunning -contains 1)
+    } else { $VBS_Status=$false; $HVCI_Status=$false; $CredGuard_Status=$false }
+} catch { $VBS_Status=$false; $HVCI_Status=$false; $CredGuard_Status=$false }
 
-# 2.3 Kernel DMA Protection
-try {
-    $DMA_Status = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\DMAProtection' -Name 'DmaSecurityLevel' -ErrorAction SilentlyContinue).DmaSecurityLevel -ge 1
-} catch { $DMA_Status = $false }
-
-# 2.4 Vulnerable Driver Blocklist
+# Vulnerable Driver Blocklist
 try {
     $Blocklist_Status = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name 'VulnerableDriverBlocklistEnable' -ErrorAction SilentlyContinue).VulnerableDriverBlocklistEnable -eq 1
 } catch { $Blocklist_Status = $false }
 
-# 2.5 Tamper Protection (Defender)
-try {
-    $DefenderInfo = Get-MpComputerStatus -ErrorAction SilentlyContinue
-    if ($DefenderInfo) {
-        $Tamper_Status = $DefenderInfo.IsTamperProtected
-    } else { $Tamper_Status = $false }
-} catch { $Tamper_Status = $false }
+# --- 3. Advanced Mitigations (New Request) ---
 
-# 2.6 Kernel CET (Shadow Stacks)
+# 3.1 KASLR & PML4 Randomization
+# Windows 10/11 defaults KASLR to ON unless "MoveImages" is disabled in Registry.
+try {
+    $MoveImages = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'MoveImages' -ErrorAction SilentlyContinue
+    # If key is missing, it defaults to ON (Enabled). If present and 0, it's OFF.
+    if ($MoveImages -eq $null) { $KASLR_Status = $true } 
+    elseif ($MoveImages.MoveImages -ne 0) { $KASLR_Status = $true }
+    else { $KASLR_Status = $false }
+} catch { $KASLR_Status = $true }
+
+# 3.2 KVA Shadow (Meltdown Mitigation)
+# Checked via FeatureSettingsOverride. If hardware is not vulnerable, OS might disable it, but checking if OS *can* enable it.
+try {
+    # This is a simplification. Real check involves NtQuerySystemInformation, but Registry gives a hint.
+    # 0 = Enabled/Default. 3 = Disabled.
+    $KVA_Reg = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'FeatureSettingsOverride' -ErrorAction SilentlyContinue
+    if ($KVA_Reg -ne $null -and ($KVA_Reg.FeatureSettingsOverride -band 3) -eq 3) {
+        $KVA_Status = $false # Explicitly disabled
+    } else {
+        $KVA_Status = $true # Enabled or Hardware Mitigated
+    }
+} catch { $KVA_Status = $true }
+
+# 3.3 Exploit Guard (User Mode: CFG, DEP, SEHOP, ASLR)
+try {
+    $SysMitigation = Get-ProcessMitigation -System
+    $DEP_Status    = ($SysMitigation.Dep.Enable -eq $true)
+    $CFG_Status    = ($SysMitigation.ControlFlowGuard.Enable -eq $true) # User Mode CFG
+    $SEHOP_Status  = ($SysMitigation.Sehop.Enable -eq $true) # Exception Chain Validation
+    $ForceASLR_Status = ($SysMitigation.Aslr.ForceRelocateImages -eq $true) # Force ASLR (helps against non-ASLR DLLs)
+} catch {
+    $DEP_Status=$false; $CFG_Status=$false; $SEHOP_Status=$false; $ForceASLR_Status=$false
+}
+
+# 3.4 Kernel Control Flow Guard (KCFG)
+# Usually tied to VBS/HVCI, but can exist independently supported by hardware.
+$KCFG_Status = $VBS_Status # Strongest indicator for PS script without diving into kernel structures.
+
+# 3.5 SMAP / SMEP / KCET
+# Hard to check directly via PS without Driver, but we can assume modern Windows 11 enables them if HW supports.
+# KCET (Shadow Stacks) check:
 try {
     $KCET_Status = (Get-ItemPropertyValue -Path 'HKLM:\SYSTEM\ControlSet001\Control\DeviceGuard\Scenarios\KernelShadowStacks\' -Name Enabled -ErrorAction SilentlyContinue) -eq 1
 } catch { $KCET_Status = $false }
 
-# 2.7 SMEP (Assuming True for modern OS)
-$SMEP_Status = $true 
+# 3.6 Attack Surface Reduction (ASR)
+try {
+    $MpPref = Get-MpPreference -ErrorAction SilentlyContinue
+    $ASR_Count = $MpPref.AttackSurfaceReductionRules_Ids.Count
+    if ($ASR_Count -gt 0) { $ASR_Status = $true; $ASR_Note = "$ASR_Count Rules Active" }
+    else { $ASR_Status = $false; $ASR_Note = "No Rules Configured" }
+} catch { $ASR_Status = $false; $ASR_Note = "Defender Error" }
 
-# --- 3. Status Table ---
-Write-Host "`n=== Security Mitigation Status ===" -ForegroundColor Magenta
+# 3.7 ACG (Arbitrary Code Guard) & CIG (Code Integrity Guard)
+# These are typically per-process (like Edge), but we check if System enforces strict Code Integrity.
+try {
+    $CIG_Reg = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name 'VerifiedAndReputablePolicyState' -ErrorAction SilentlyContinue)
+    $CIG_Status = ($CIG_Reg -ne $null) # Rough check if strict policy exists
+} catch { $CIG_Status = $false }
 
+
+# --- 4. Render Output Table ---
 $Results = @()
-$Results += [PSCustomObject]@{ Feature = "Secure Boot"; Enabled = $SecureBoot; Note = "Prevents unsigned bootloaders (Bootkits)" }
-$Results += [PSCustomObject]@{ Feature = "Virtualization-based Security (VBS)"; Enabled = ($VBS_Status -eq 2); Note = "Hypervisor Ring -1 Active" }
-$Results += [PSCustomObject]@{ Feature = "HVCI (Memory Integrity)"; Enabled = $HVCI_Status; Note = "Blocks Kernel Code Injection & unsigned drivers" }
-$Results += [PSCustomObject]@{ Feature = "Credential Guard"; Enabled = $CredGuard_Status; Note = "Isolates LSASS secrets" }
-$Results += [PSCustomObject]@{ Feature = "Kernel DMA Protection"; Enabled = $DMA_Status; Note = "Prevents DMA hardware attacks" }
-$Results += [PSCustomObject]@{ Feature = "Vulnerable Driver Blocklist"; Enabled = $Blocklist_Status; Note = "Blocks known bad drivers (BYOVD defense)" }
-$Results += [PSCustomObject]@{ Feature = "Defender Tamper Protection"; Enabled = $Tamper_Status; Note = "Prevents disabling AV via Registry/PowerShell" }
-$Results += [PSCustomObject]@{ Feature = "Kernel Shadow Stacks (KCET)"; Enabled = $KCET_Status; Note = "Prevents ROP (Return-Oriented Programming)" }
-$Results += [PSCustomObject]@{ Feature = "SMEP (Supervisor Mode Exec Prev)"; Enabled = $SMEP_Status; Note = "Prevents executing User-Mode code in Kernel" }
 
-# Render Table
+# Group 1: Kernel & Virtualization
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="HVCI (Memory Integrity)"; Enabled=$HVCI_Status; Note="Blocks Kernel Injection" }
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="KASLR (High Entropy)"; Enabled=$KASLR_Status; Note="Randomizes Kernel Base" }
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="KVA Shadow (Meltdown)"; Enabled=$KVA_Status; Note="Isolates Kernel Page Tables" }
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="KCFG (Kernel CFG)"; Enabled=$KCFG_Status; Note="Protects Kernel Indirect Calls" }
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="KCET (Shadow Stacks)"; Enabled=$KCET_Status; Note="Prevents Kernel ROP" }
+$Results += [PSCustomObject]@{ Category="Kernel"; Feature="SMAP/SMEP Support"; Enabled=$true; Note="Assumed on Win11 (Prevents User Access)" }
+
+# Group 2: User Mode & Memory
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="CFG (Control Flow Guard)"; Enabled=$CFG_Status; Note="Prevents Indirect Call Abuse" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="DEP (Data Exec Prev)"; Enabled=$DEP_Status; Note="No Execute (NX) Stack/Heap" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="SEHOP (Exception Chain)"; Enabled=$SEHOP_Status; Note="Prevents SEH Overwrites" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="Force ASLR / Bottom-Up"; Enabled=$ForceASLR_Status; Note="Enforced Randomization" }
+$Results += [PSCustomObject]@{ Category="UserMode"; Feature="ACG / CIG (Policy)"; Enabled=$CIG_Status; Note="Code Integrity Policy" }
+
+# Group 3: System Defense
+$Results += [PSCustomObject]@{ Category="System"; Feature="Secure Boot"; Enabled=$SecureBoot; Note="Rootkit Prevention" }
+$Results += [PSCustomObject]@{ Category="System"; Feature="Credential Guard"; Enabled=$CredGuard_Status; Note="Protects LSA Secrets" }
+$Results += [PSCustomObject]@{ Category="System"; Feature="Driver Blocklist"; Enabled=$Blocklist_Status; Note="Blocks Bad Drivers (BYOVD)" }
+$Results += [PSCustomObject]@{ Category="System"; Feature="ASR (Attack Surface Red)"; Enabled=$ASR_Status; Note=$ASR_Note }
+
+Write-Host "`n=== Advanced Security Mitigation Status ===" -ForegroundColor Magenta
+
+# Display Table
 foreach ($item in $Results) {
-    Write-Color $item.Feature.PadRight(35) -NoNewline
+    Write-Color "[$($item.Category)]".PadRight(12) -Color Cyan -NoNewline
+    Write-Color $item.Feature.PadRight(30) -NoNewline
     $color = Get-StatusColor -Enabled $item.Enabled
     $statusText = if ($item.Enabled) { "ON" } else { "OFF" }
     Write-Color $statusText.PadRight(10) -Color $color -NoNewline
     Write-Host "| $($item.Note)"
 }
 
-# --- 4. Hacker's Perspective (Attack Surface Analysis) ---
-Write-Host "`n=== Exploitation Feasibility Analysis (Hacker View) ===" -ForegroundColor Magenta
+# --- 5. Hacker's Perspective (Updated) ---
+Write-Host "`n=== Exploitation Difficulty Analysis (Hacker View) ===" -ForegroundColor Magenta
 
-# Logic 1: Token Patching (DKOM)
-$Feasibility_Patching = if ($HVCI_Status) { "Hard (BSOD Risk)" } else { "High (DKOM possible)" }
-$Color_Patching = Get-StatusColor -Enabled ($HVCI_Status) -Inverse $true
+# Analysis Logic
+$InfoLeak_Req = if ($KASLR_Status) { "Required (Hard)" } else { "Not Required" }
+$ROP_Diff = if ($KCET_Status) { "Very Hard (JOP/COP required)" } else { "Standard ROP" }
+$Heap_Diff = if ($CFG_Status) { "Hard (Need Metadata corruption)" } else { "Standard Heap Spray" }
+$Kernel_Write = if ($SMAP_Status -and $HVCI_Status) { "Impossible (Need Data-Only)" } elseif ($SMAP_Status) { "Hard (Pivot Required)" } else { "Easy" }
 
-# Logic 2: Token Stealing (Pointer Swapping)
-$Feasibility_Stealing = if ($HVCI_Status) { "Medium (Data-only attack required)" } else { "High (Standard shellcode works)" }
-$Color_Stealing = if ($HVCI_Status) { "Yellow" } else { "Red" }
+Write-Host "1. Kernel Exploit (Info Leak) : " -NoNewline; Write-Color $InfoLeak_Req -Color (Get-StatusColor $KASLR_Status)
+Write-Host "2. ROP Chain Construction     : " -NoNewline; Write-Color $ROP_Diff -Color (Get-StatusColor $KCET_Status)
+Write-Host "3. Function Pointer Overwrite : " -NoNewline; Write-Color $Heap_Diff -Color (Get-StatusColor $CFG_Status)
+Write-Host "4. Kernel Payload Execution   : " -NoNewline; Write-Color $Kernel_Write -Color (Get-StatusColor $HVCI_Status)
+Write-Host "5. Initial Access (Macro/Script): " -NoNewline; Write-Color "$($ASR_Note)" -Color (Get-StatusColor $ASR_Status)
 
-# Logic 3: BYOVD (Bring Your Own Vulnerable Driver)
-$Feasibility_BYOVD = if ($Blocklist_Status) { "Hard (Must find 0-day driver)" } else { "High (Load known bad driver)" }
-$Color_BYOVD = Get-StatusColor -Enabled ($Blocklist_Status) -Inverse $true
-
-# Logic 4: Mimikatz (LSASS Dump)
-$Feasibility_Mimikatz = if ($CredGuard_Status) { "Impossible (Secrets Isolated)" } else { "High (Standard Dump)" }
-$Color_Mimikatz = Get-StatusColor -Enabled ($CredGuard_Status) -Inverse $true
-
-# Logic 5: Bootkit
-$Feasibility_Bootkit = if ($SecureBoot) { "Hard (Need UEFI exploit)" } else { "High (Modify Bootloader)" }
-$Color_Bootkit = Get-StatusColor -Enabled ($SecureBoot) -Inverse $true
-
-Write-Host "1. Token Patching (DKOM)      : " -NoNewline; Write-Color $Feasibility_Patching -Color $Color_Patching
-Write-Host "2. Token Stealing (Swap)      : " -NoNewline; Write-Color $Feasibility_Stealing -Color $Color_Stealing
-Write-Host "3. BYOVD Attack               : " -NoNewline; Write-Color $Feasibility_BYOVD -Color $Color_BYOVD
-Write-Host "4. LSASS Dump (Mimikatz)      : " -NoNewline; Write-Color $Feasibility_Mimikatz -Color $Color_Mimikatz
-Write-Host "5. Bootkit Persistence        : " -NoNewline; Write-Color $Feasibility_Bootkit -Color $Color_Bootkit
-
-Write-Host "`n[*] Analysis Complete." -ForegroundColor Gray
+Write-Host "`n[*] Deep Analysis Complete." -ForegroundColor Gray
